@@ -189,6 +189,16 @@ const ARTracer: React.FC = () => {
   const [zoom, setZoom] = useState(1);
   const [isMinimized, setIsMinimized] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [showGestureHint, setShowGestureHint] = useState(false);
+
+  // Muestra el hint al cargar la imagen, lo oculta solo tras 2.5s
+  useEffect(() => {
+    if (image) {
+      setShowGestureHint(true);
+      const t = setTimeout(() => setShowGestureHint(false), 2800);
+      return () => clearTimeout(t);
+    }
+  }, [image]);
 
   // GESTOS TÁCTILES
   const bind = useGesture(
@@ -196,10 +206,12 @@ const ARTracer: React.FC = () => {
       onDrag: ({ offset: [x, y], touches }) => {
         // Solo drag con 1 dedo (2 dedos = pinch)
         if (isLocked || touches > 1) return;
+        setShowGestureHint(false); // Oculta el hint al primer gesto
         setOffset({ x, y });
       },
       onPinch: ({ offset: [scale, angle] }) => {
         if (isLocked) return;
+        setShowGestureHint(false);
         setZoom(Math.max(0.1, scale));
         setRotation(angle);
       },
@@ -296,6 +308,98 @@ const ARTracer: React.FC = () => {
                 objectFit: 'contain'
               }}
             />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* GESTURE HINT — aparece al cargar imagen, desaparece solo o al tocar */}
+      <AnimatePresence>
+        {showGestureHint && (
+          <motion.div
+            key="gesture-hint"
+            initial={{ opacity: 0, scale: 0.85, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: 10 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 200 }}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              bottom: isMinimized ? 0 : '260px',
+              zIndex: 35,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            <div style={{
+              background: 'rgba(10, 10, 10, 0.55)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '24px',
+              padding: '20px 28px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '14px',
+            }}>
+              {/* Iconos de dedos animados */}
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px' }}>
+                {/* Dedo drag */}
+                <motion.div
+                  animate={{ x: [0, 18, 0] }}
+                  transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}
+                >
+                  <svg width="26" height="38" viewBox="0 0 26 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="9" y="0" width="8" height="22" rx="4" fill="white" opacity="0.9"/>
+                    <path d="M4 18 Q1 22 2 28 Q4 36 13 37 Q22 36 24 28 Q25 22 22 18 L17 14 V10 Q17 8 13 8 Q9 8 9 10 V18 Z" fill="white" opacity="0.9"/>
+                  </svg>
+                  <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'rgba(255,255,255,0.4)' }} />
+                </motion.div>
+
+                {/* Separador */}
+                <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.15)', marginBottom: '8px' }} />
+
+                {/* Dos dedos pinch */}
+                <motion.div
+                  animate={{ gap: ['14px', '6px', '14px'] }}
+                  transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut', delay: 0.3 }}
+                  style={{ display: 'flex', alignItems: 'flex-end', gap: '14px' }}
+                >
+                  {[0, 1].map(i => (
+                    <motion.div
+                      key={i}
+                      animate={{ x: i === 0 ? [0, 5, 0] : [0, -5, 0] }}
+                      transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut', delay: 0.3 }}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}
+                    >
+                      <svg width="18" height="28" viewBox="0 0 18 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="5" y="0" width="8" height="16" rx="4" fill="white" opacity="0.7"/>
+                        <path d="M2 14 Q0 17 1 21 Q3 27 9 27 Q15 27 17 21 Q18 17 16 14 L12 10 V8 Q12 6 9 6 Q6 6 6 8 V14 Z" fill="white" opacity="0.7"/>
+                      </svg>
+                      <div style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'rgba(255,255,255,0.3)' }} />
+                    </motion.div>
+                  ))}
+                </motion.div>
+              </div>
+
+              {/* Labels */}
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                <span style={{ fontSize: '10px', fontWeight: '700', letterSpacing: '0.08em', opacity: 0.5, color: '#fff', textTransform: 'uppercase' }}>
+                  Arrastra
+                </span>
+                <div style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+                <span style={{ fontSize: '10px', fontWeight: '700', letterSpacing: '0.08em', color: '#facc15', textTransform: 'uppercase' }}>
+                  Pellizca para zoom
+                </span>
+                <div style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'rgba(255,255,255,0.25)' }} />
+                <span style={{ fontSize: '10px', fontWeight: '700', letterSpacing: '0.08em', opacity: 0.5, color: '#fff', textTransform: 'uppercase' }}>
+                  Rota
+                </span>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
