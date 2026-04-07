@@ -10,8 +10,10 @@ import {
   Lock, 
   Unlock, 
   Maximize2,
-  ChevronDown
+  ChevronDown,
+  RefreshCw
 } from 'lucide-react';
+import { useGesture } from '@use-gesture/react';
 
 // --- ESTILOS CSS INLINE PARA MÁXIMA PORTABILIDAD ---
 const styles = `
@@ -84,6 +86,10 @@ const styles = `
   }
   .animate-pulse-slow {
     animation: pulse-slow 3s infinite;
+  }
+  .gesture-area {
+    touch-action: none;
+    user-select: none;
   }
 `;
 
@@ -180,6 +186,31 @@ const ARTracer: React.FC = () => {
   const [isLocked, setIsLocked] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+
+  // GESTOS TÁCTILES
+  const bind = useGesture(
+    {
+      onDrag: ({ offset: [x, y], memo }) => {
+        if (isLocked) return memo;
+        setOffset({ x, y });
+        return memo;
+      },
+      onPinch: ({ offset: [d, a], memo }) => {
+        if (isLocked) return memo;
+        setZoom(d);
+        setRotation(a);
+        return memo;
+      },
+    },
+    {
+      drag: { from: () => [offset.x, offset.y] },
+      pinch: { 
+        from: () => [zoom, rotation],
+        scaleBounds: { min: 0.1, max: 10 },
+      },
+    }
+  );
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -214,18 +245,26 @@ const ARTracer: React.FC = () => {
       <AnimatePresence>
         {image && (
           <motion.div 
+            {...(isLocked ? {} : bind())}
             initial={{ opacity: 0 }}
             animate={{ opacity: opacity }}
-            className="absolute inset-0 pointer-events-none flex items-center justify-center z-10"
+            className={`absolute inset-0 flex items-center justify-center z-10 ${isLocked ? 'pointer-events-none' : 'pointer-events-auto gesture-area'}`}
           >
             <motion.img
               src={image}
               alt="Overlay"
               className={isOutlineMode ? 'outline-mode' : ''}
+              animate={{
+                x: offset.x,
+                y: offset.y,
+                rotate: rotation,
+                scaleX: isMirrored ? -zoom : zoom,
+                scaleY: zoom
+              }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200, mass: 0.5 }}
               style={{
-                transform: `rotate(${rotation}deg) scaleX(${isMirrored ? -1 : 1}) scale(${zoom})`,
-                maxWidth: '95%',
-                maxHeight: '95%',
+                maxWidth: '90%',
+                maxHeight: '90%',
                 objectFit: 'contain'
               }}
             />
@@ -368,6 +407,9 @@ const ARTracer: React.FC = () => {
                     cursor: 'pointer'
                   }}>
                     <FlipHorizontal size={22} />
+                  </button>
+                  <button onClick={() => { setOffset({ x: 0, y: 0 }); setZoom(1); setRotation(0); }} className="glass-button" style={{ cursor: 'pointer' }}>
+                    <RefreshCw size={20} />
                   </button>
                 </div>
 
