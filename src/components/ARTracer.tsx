@@ -89,7 +89,9 @@ const styles = `
   }
   .gesture-area {
     touch-action: none;
+    -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
   }
 `;
 
@@ -191,25 +193,30 @@ const ARTracer: React.FC = () => {
   // GESTOS TÁCTILES
   const bind = useGesture(
     {
-      onDrag: ({ offset: [x, y] }) => {
-        if (isLocked) return;
+      onDrag: ({ offset: [x, y], touches }) => {
+        // Solo drag con 1 dedo (2 dedos = pinch)
+        if (isLocked || touches > 1) return;
         setOffset({ x, y });
       },
-      onPinch: ({ offset: [d, a] }) => {
+      onPinch: ({ offset: [scale, angle] }) => {
         if (isLocked) return;
-        setZoom(d);
-        setRotation(a);
+        setZoom(Math.max(0.1, scale));
+        setRotation(angle);
       },
     },
     {
+      // passive:false es CRÍTICO para capturar gestos antes del browser
+      eventOptions: { passive: false },
       drag: { 
         from: () => [offset.x, offset.y],
         filterTaps: true,
-        threshold: 1
+        threshold: 5,
+        pointer: { touch: true },
       },
       pinch: { 
         from: () => [zoom, rotation],
         scaleBounds: { min: 0.1, max: 10 },
+        pointer: { touch: true },
       },
     }
   );
@@ -243,12 +250,23 @@ const ARTracer: React.FC = () => {
         }}
       />
 
-      {/* CAPA DE GESTOS (INTERMEDIARIA) */}
-      {!isLocked && image && (
+      {/* CAPA DE GESTOS — z-30: encima de imagen (z-10) y decorativos, debajo de UI panel (z-40) */}
+      {image && (
         <div 
-          {...bind()} 
-          className="absolute inset-0 z-20 gesture-area pointer-events-auto"
-          style={{ cursor: 'move' }}
+          {...(!isLocked ? bind() : {})}
+          className="gesture-area"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            // Ocupa toda la pantalla MENOS el panel de controles cuando está abierto
+            bottom: isMinimized || isLocked ? 0 : '260px',
+            zIndex: 30,
+            cursor: isLocked ? 'default' : 'move',
+            touchAction: 'none',         // inline: obligatorio para @use-gesture
+            WebkitUserSelect: 'none',
+            userSelect: 'none',
+            pointerEvents: isLocked ? 'none' : 'auto',
+          }}
         />
       )}
 
