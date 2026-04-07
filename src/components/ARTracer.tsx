@@ -191,20 +191,22 @@ const ARTracer: React.FC = () => {
   // GESTOS TÁCTILES
   const bind = useGesture(
     {
-      onDrag: ({ offset: [x, y], memo }) => {
-        if (isLocked) return memo;
+      onDrag: ({ offset: [x, y] }) => {
+        if (isLocked) return;
         setOffset({ x, y });
-        return memo;
       },
-      onPinch: ({ offset: [d, a], memo }) => {
-        if (isLocked) return memo;
+      onPinch: ({ offset: [d, a] }) => {
+        if (isLocked) return;
         setZoom(d);
         setRotation(a);
-        return memo;
       },
     },
     {
-      drag: { from: () => [offset.x, offset.y] },
+      drag: { 
+        from: () => [offset.x, offset.y],
+        filterTaps: true,
+        threshold: 1
+      },
       pinch: { 
         from: () => [zoom, rotation],
         scaleBounds: { min: 0.1, max: 10 },
@@ -241,14 +243,22 @@ const ARTracer: React.FC = () => {
         }}
       />
 
+      {/* CAPA DE GESTOS (INTERMEDIARIA) */}
+      {!isLocked && image && (
+        <div 
+          {...bind()} 
+          className="absolute inset-0 z-20 gesture-area pointer-events-auto"
+          style={{ cursor: 'move' }}
+        />
+      )}
+
       {/* IMAGEN DE CALCO (OVERLAY) */}
       <AnimatePresence>
         {image && (
           <motion.div 
-            {...(isLocked ? {} : bind())}
             initial={{ opacity: 0 }}
             animate={{ opacity: opacity }}
-            className={`absolute inset-0 flex items-center justify-center z-10 ${isLocked ? 'pointer-events-none' : 'pointer-events-auto gesture-area'}`}
+            className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none"
           >
             <motion.img
               src={image}
