@@ -9,7 +9,8 @@ import {
   Eye, 
   Lock, 
   Unlock, 
-  Maximize2
+  Maximize2,
+  ChevronDown
 } from 'lucide-react';
 
 // --- ESTILOS CSS INLINE PARA MÁXIMA PORTABILIDAD ---
@@ -178,6 +179,7 @@ const ARTracer: React.FC = () => {
   const [isOutlineMode, setIsOutlineMode] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [isMinimized, setIsMinimized] = useState(false);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -262,13 +264,69 @@ const ARTracer: React.FC = () => {
 
         {/* CONTROLES / GLASS PANEL - BOTTOM */}
         <AnimatePresence>
-          {!isLocked ? (
+          {isLocked ? (
+            /* LOCK MODE OVERLAY */
             <motion.div 
+              key="lock-overlay"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="fixed inset-0 z-[100] bg-black/10 flex flex-col items-center justify-center gap-6 pointer-events-auto"
+              onClick={() => {}}
+            >
+              <button 
+                onClick={() => setIsLocked(false)}
+                style={{ 
+                  width: '100px', height: '100px', borderRadius: '50%', 
+                  background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)',
+                  backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyItems: 'center',
+                  boxShadow: '0 0 50px rgba(0,0,0,0.5)', cursor: 'pointer'
+                }}
+              >
+                <Lock size={40} className="accent-yellow" />
+              </button>
+              <p style={{ fontSize: '9px', letterSpacing: '0.2em', opacity: 0.5, fontWeight: 'bold', textTransform: 'uppercase' }}>
+                Tap para desbloquear</p>
+            </motion.div>
+          ) : isMinimized ? (
+            /* MINIMIZED VIEW - ACTION BUTTON */
+            <div key="minimized-btn" className="absolute bottom-6 right-6 pointer-events-auto">
+              <motion.button
+                initial={{ scale: 0, rotate: -45 }}
+                animate={{ scale: 1, rotate: 0 }}
+                exit={{ scale: 0, rotate: 45 }}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setIsMinimized(false)}
+                className="glass-button"
+                style={{ 
+                  width: '64px', height: '64px', border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'rgba(15, 15, 15, 0.6)', borderRadius: '22px', cursor: 'pointer'
+                }}
+              >
+                 <Maximize2 size={24} className="accent-yellow" />
+              </motion.button>
+            </div>
+          ) : (
+            /* FULL CONTROLS */
+            <motion.div 
+              key="full-controls"
               initial={{ y: 50, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 50, opacity: 0 }}
               className="glass-panel p-6 pointer-events-auto max-w-lg mx-auto w-full flex flex-col gap-6"
             >
+              {/* Header inside Panel */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '-10px' }}>
+                <span style={{ fontSize: '10px', fontWeight: '900', letterSpacing: '0.1em', opacity: 0.3 }}>HERRAMIENTAS DE CALCO</span>
+                <button 
+                  onClick={() => setIsMinimized(true)}
+                  style={{ background: 'transparent', border: 'none', color: '#fff', opacity: 0.5, cursor: 'pointer', padding: '5px' }}
+                >
+                  <ChevronDown size={20} />
+                </button>
+              </div>
+
               {/* Sliders Area */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -297,16 +355,17 @@ const ARTracer: React.FC = () => {
               {/* Toolbar Area */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <label className="glass-button" style={{ background: '#3b82f6', color: '#fff', border: 'none' }}>
+                  <label className="glass-button" style={{ background: '#3b82f6', color: '#fff', border: 'none', cursor: 'pointer' }}>
                     <ImageIcon size={22} />
                     <input type="file" accept="image/*" onChange={handleUpload} style={{ display: 'none' }} />
                   </label>
-                  <button onClick={() => setRotation(r => (r + 90) % 360)} className="glass-button">
+                  <button onClick={() => setRotation(r => (r + 90) % 360)} className="glass-button" style={{ cursor: 'pointer' }}>
                     <RotateCw size={22} />
                   </button>
                   <button onClick={() => setIsMirrored(!isMirrored)} className="glass-button" style={{ 
                     background: isMirrored ? '#fff' : 'rgba(255,255,255,0.08)',
-                    color: isMirrored ? '#000' : '#fff'
+                    color: isMirrored ? '#000' : '#fff',
+                    cursor: 'pointer'
                   }}>
                     <FlipHorizontal size={22} />
                   </button>
@@ -316,11 +375,12 @@ const ARTracer: React.FC = () => {
                   <button onClick={() => setIsOutlineMode(!isOutlineMode)} className="glass-button" style={{ 
                     background: isOutlineMode ? '#facc15' : 'rgba(255,255,255,0.08)',
                     color: isOutlineMode ? '#000' : '#fff',
-                    fontWeight: '900', fontSize: '10px'
+                    fontWeight: '900', fontSize: '10px',
+                    cursor: 'pointer'
                   }}>
                     CONTORNO
                   </button>
-                  <button onClick={() => setIsLocked(true)} className="glass-button" style={{ background: '#fff', color: '#000' }}>
+                  <button onClick={() => setIsLocked(true)} className="glass-button" style={{ background: '#fff', color: '#000', cursor: 'pointer' }}>
                     <Unlock size={22} strokeWidth={3} />
                   </button>
                 </div>
@@ -350,28 +410,6 @@ const ARTracer: React.FC = () => {
                   </div>
                 )}
               </div>
-            </motion.div>
-          ) : (
-            /* LOCK MODE OVERLAY */
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="fixed inset-0 z-[100] bg-black/10 flex flex-col items-center justify-center gap-6 pointer-events-auto"
-              onClick={() => {}}
-            >
-              <button 
-                onClick={() => setIsLocked(false)}
-                style={{ 
-                  width: '100px', height: '100px', borderRadius: '50%', 
-                  background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)',
-                  backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: '0 0 50px rgba(0,0,0,0.5)'
-                }}
-              >
-                <Lock size={40} className="accent-yellow" />
-              </button>
-              <p style={{ fontSize: '9px', letterSpacing: '0.2em', opacity: 0.5, fontWeight: 'bold', textTransform: 'uppercase' }}>
-                Tap para desbloquear</p>
             </motion.div>
           )}
         </AnimatePresence>
