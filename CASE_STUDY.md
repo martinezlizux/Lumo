@@ -1,34 +1,42 @@
 # Lumo AR Tracer — Case Study
 
-> *"Artists have traced light for centuries. I just put it in a phone."*
+> *"Si ya existe pero es de paga, ¿por qué no construir la mía y compartirla?"*
 
 ---
 
-## El Problema
+## El Contexto
 
-Siempre fui de las personas que aprende dibujando, observando, copiando. Hay una técnica que los artistas han usado por siglos: proyectar una imagen sobre una superficie y trazar sus líneas a mano para aprender proporciones, perspectiva y estructura. Con lightboxes, retroproyectores, o incluso sosteniendo una hoja contra una ventana con luz.
+No inventé nada nuevo. Ya existen apps que hacen esto — algunas bien hechas, la mayoría de paga, varias con suscripciones mensuales para una funcionalidad que debería ser simple y accesible.
 
-El problema es que en 2024, esa técnica sigue requiriendo equipo físico. Un lightbox cuesta dinero, ocupa espacio, y no te lo llevas a todos lados.
+Soy diseñadora. Trazo. Y un día, en lugar de pagar por una herramienta que necesitaba, decidí construirla yo misma.
 
-Un día estaba practicando y pensé: **tengo una cámara trasera, tengo una pantalla, tengo una CPU capaz de procesar video en tiempo real... ¿por qué no existe una app que haga esto?**
+Eso es lo que me parece fascinante de la era del *vibe coding*: **por primera vez en la historia, puedo construir exactamente la herramienta que necesito, adaptada a mi flujo de trabajo, sin depender de que alguien más la haga o la venda.** Y después puedo compartirla con otros artistas que tienen la misma necesidad.
 
-Busqué. Las opciones existentes eran torpes, llenas de anuncios, o simplemente no funcionaban bien en mobile. Ninguna se sentía hecha *para artistas*.
+Lumo no es un producto revolucionario. Es una afirmación:
 
-Así que la hice yo.
+> *Puedo construir mis propias herramientas.*
 
 ---
 
-## La Idea
+## La Técnica
 
-**Lumo** es una Progressive Web App (PWA) que usa la cámara trasera de tu teléfono como fondo en tiempo real, y superpone encima cualquier imagen que elijas — con opacidad ajustable, zoom, rotación y modo contorno.
+Antes de la app: los artistas proyectan imágenes sobre superficies para trazar proporciones, perspectiva y estructura. Con lightboxes, retroproyectores, o sosteniendo una hoja contra una ventana con luz. Es una técnica de siglos.
+
+El problema es que en 2025 sigues necesitando equipo físico para hacerlo — a menos que pagues una suscripción mensual por una app que hace exactamente lo que tu teléfono ya podría hacer solo.
+
+---
+
+## La Solución
+
+**Lumo** es una PWA gratuita y de código abierto que usa la cámara trasera de tu teléfono como fondo en tiempo real, y superpone encima cualquier imagen que elijas.
 
 La idea es simple:
 1. Apunta tu teléfono hacia el papel donde quieres dibujar.
 2. Sube la imagen que quieres trazar.
-3. Ajusta la opacidad hasta que la imagen se funda con el papel, como si estuviera proyectada.
+3. Ajusta la opacidad hasta que la imagen se funda con el papel.
 4. Traza.
 
-Sin cables. Sin equipo. Solo tu teléfono.
+Sin cables. Sin equipo. Sin suscripción. Solo tu teléfono.
 
 ---
 
