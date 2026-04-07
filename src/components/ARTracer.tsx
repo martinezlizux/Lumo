@@ -321,7 +321,7 @@ const ARTracer: React.FC = () => {
                 <span style={{ fontSize: '10px', fontWeight: '900', letterSpacing: '0.1em', opacity: 0.3 }}>HERRAMIENTAS DE CALCO</span>
                 <button 
                   onClick={() => setIsMinimized(true)}
-                  style={{ background: 'transparent', border: 'none', color: '#fff', opacity: 0.5, cursor: 'pointer', padding: '5px' }}
+                  style={{ background: 'transparent', border: 'none', color: '#fff', opacity: 0.5, cursor: 'pointer', padding: '10px' }}
                 >
                   <ChevronDown size={20} />
                 </button>
