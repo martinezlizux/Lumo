@@ -11,7 +11,15 @@ import {
   Unlock, 
   Maximize2,
   ChevronDown,
-  RefreshCw
+  RefreshCw,
+  Video,
+  StopCircle,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Plus,
+  Minus
 } from 'lucide-react';
 import { useGesture } from '@use-gesture/react';
 
@@ -147,7 +155,7 @@ const useCamera = () => {
     return () => stream?.getTracks().forEach(t => t.stop());
   }, [startCamera]);
 
-  return { videoRef, isTorchOn, hasTorch, toggleTorch, startCamera, error };
+  return { videoRef, stream, isTorchOn, hasTorch, toggleTorch, startCamera, error };
 };
 
 /**
@@ -176,8 +184,46 @@ const useWakeLock = () => {
 };
 
 const ARTracer: React.FC = () => {
-  const { videoRef, isTorchOn, hasTorch, toggleTorch, startCamera, error } = useCamera();
+  const { videoRef, stream, isTorchOn, hasTorch, toggleTorch, startCamera, error } = useCamera();
   const wakeLockActive = useWakeLock();
+
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunks = useRef<Blob[]>([]);
+
+  const handleRecordToggle = () => {
+    if (!stream) return;
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      recordedChunks.current = [];
+      const types = ['video/webm; codecs=vp9', 'video/webm', 'video/mp4'];
+      const mimeType = types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.current.push(e.data);
+      };
+      
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunks.current, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        a.download = `lumo-timelapse-${new Date().getTime()}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+      };
+      
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    }
+  };
 
   // Estados de Imagen
   const [image, setImage] = useState<string | null>(null);
@@ -420,6 +466,15 @@ const ARTracer: React.FC = () => {
 
           {!isLocked && (
             <div className="flex gap-2 pointer-events-auto">
+              <button onClick={handleRecordToggle} className="glass-button" style={{ 
+                background: isRecording ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.08)',
+                color: isRecording ? '#ef4444' : '#fff',
+                borderColor: isRecording ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.1)',
+                boxShadow: isRecording ? '0 0 20px rgba(239, 68, 68, 0.4)' : 'none'
+              }}>
+                {isRecording ? <div className="flex items-center gap-2"><StopCircle size={22} /><span className="text-[10px] font-bold tracking-widest animate-pulse">REC</span></div> : <Video size={22} />}
+              </button>
+
               {hasTorch && (
                 <button onClick={toggleTorch} className="glass-button" style={{ 
                   background: isTorchOn ? '#facc15' : 'rgba(255,255,255,0.08)',
@@ -436,28 +491,55 @@ const ARTracer: React.FC = () => {
         {/* CONTROLES / GLASS PANEL - BOTTOM */}
         <AnimatePresence>
           {isLocked ? (
-            /* LOCK MODE OVERLAY */
+            /* MURAL MODE (LOCK) OVERLAY */
             <motion.div 
               key="lock-overlay"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="fixed inset-0 z-[100] bg-black/10 flex flex-col items-center justify-center gap-6 pointer-events-auto"
-              onClick={() => {}}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[100] pointer-events-none flex items-center justify-between p-6"
             >
-              <button 
-                onClick={() => setIsLocked(false)}
-                style={{ 
-                  width: '100px', height: '100px', borderRadius: '50%', 
-                  background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.2)',
-                  backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyItems: 'center',
-                  boxShadow: '0 0 50px rgba(0,0,0,0.5)', cursor: 'pointer'
-                }}
-              >
-                <Lock size={40} className="accent-yellow" />
-              </button>
-              <p style={{ fontSize: '9px', letterSpacing: '0.2em', opacity: 0.5, fontWeight: 'bold', textTransform: 'uppercase' }}>
-                Tap para desbloquear</p>
+              {/* Controles finos (Mural Mode) a la izquierda */}
+              <div className="pointer-events-auto flex flex-col gap-4 bg-black/40 p-4 rounded-[32px] backdrop-blur-xl border border-white/10" style={{ boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[9px] font-bold text-white/50 tracking-widest mb-2">MURAL POS</span>
+                  <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, y: o.y - 1 }))}><ArrowUp size={18}/></button>
+                  <div className="flex gap-1 my-1">
+                    <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, x: o.x - 1 }))}><ArrowLeft size={18}/></button>
+                    <div className="w-1" />
+                    <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, x: o.x + 1 }))}><ArrowRight size={18}/></button>
+                  </div>
+                  <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, y: o.y + 1 }))}><ArrowDown size={18}/></button>
+                </div>
+                
+                <div className="w-full h-px bg-white/10 my-2" />
+                
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[9px] font-bold text-white/50 tracking-widest mb-2">MURAL ZOOM</span>
+                  <button className="glass-button p-3" onClick={() => setZoom(z => z + 0.005)}><Plus size={18}/></button>
+                  <button className="glass-button p-3" onClick={() => setZoom(z => Math.max(0.01, z - 0.005))}><Minus size={18}/></button>
+                </div>
+              </div>
+
+              {/* Botón de desbloqueo a la derecha */}
+              <div className="pointer-events-auto flex flex-col items-center gap-4 self-end">
+                <button 
+                  onClick={() => setIsLocked(false)}
+                  style={{ 
+                    width: '80px', height: '80px', borderRadius: '50%', 
+                    background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)',
+                    backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 0 50px rgba(0,0,0,0.5)', cursor: 'pointer'
+                  }}
+                >
+                  <Lock size={32} className="accent-yellow" />
+                </button>
+                <div style={{ background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
+                  <p style={{ fontSize: '9px', letterSpacing: '0.2em', opacity: 0.8, fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>
+                    MURAL MODE LOCKED
+                  </p>
+                </div>
+              </div>
             </motion.div>
           ) : isMinimized ? (
             /* MINIMIZED VIEW - ACTION BUTTON */
