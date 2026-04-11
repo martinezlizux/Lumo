@@ -332,9 +332,15 @@ const ARTracer: React.FC = () => {
     });
   }, [trackingPoints]);
 
-  const processFrame = useCallback(() => {
+   const processFrame = useCallback(() => {
     if (!videoRef.current || !workerRef.current || trackingStatusRef.current === 'idle') {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      return;
+    }
+
+    // Verificar que el video tenga dimensiones válidas y esté listo
+    if (videoRef.current.readyState < 2 || videoRef.current.videoWidth === 0) {
+      rafRef.current = requestAnimationFrame(processFrame);
       return;
     }
 
@@ -360,6 +366,10 @@ const ARTracer: React.FC = () => {
 
   const startAIAnchoring = useCallback(() => {
     if (!videoRef.current || !workerRef.current) return;
+    if (videoRef.current.videoWidth === 0) {
+      console.warn("[ARTracer] Video not ready yet");
+      return;
+    }
     
     const w = VISION_WIDTH; 
     const h = Math.round((videoRef.current.videoHeight / videoRef.current.videoWidth) * w);
@@ -371,8 +381,11 @@ const ARTracer: React.FC = () => {
       workerRef.current.postMessage({ type: 'init', w, h });
     }
 
+    // Actualizar ref inmediatamente para que el primer frame del loop ya use el tipo correcto
+    trackingStatusRef.current = 'anchoring';
     setTrackingStatus('anchoring');
     setIsAISpatialMode(true);
+    
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(processFrame);
   }, [videoRef, processFrame]);

@@ -42,14 +42,21 @@ self.onmessage = (e) => {
   curr_img_pyr.build(curr_img_pyr.data[0], true);
 
   if (type === 'anchor') {
-    // Detección de puntos FAST
-    const corners = [];
+    // Detección de puntos FAST con umbral adaptativo
+    let corners = [];
     for (let i = 0; i < width * height; ++i) corners[i] = new jsfeat.keypoint_t();
     
-    // Umbral de detección (ajustado para balancear velocidad y cantidad de puntos)
-    const threshold = 25;
-    const count = jsfeat.fast_corners.detect(curr_img_pyr.data[0], corners, threshold);
+    let threshold = 30;
+    let count = 0;
     
+    // Intentar varios umbrales para encontrar suficientes puntos
+    while (threshold > 5 && count < 50) {
+      count = jsfeat.fast_corners.detect(curr_img_pyr.data[0], corners, threshold);
+      if (count < 50) threshold -= 5;
+    }
+    
+    console.log(`[VisionWorker] Anchored with ${count} points (threshold: ${threshold})`);
+
     // Seleccionar los mejores 100 puntos
     corners.sort((a, b) => b.score - a.score);
     point_count = Math.min(count, 100);
@@ -59,38 +66,37 @@ self.onmessage = (e) => {
       ref_xy[(i << 1) + 1] = corners[i].y;
       prev_xy[i << 1] = corners[i].x;
       prev_xy[(i << 1) + 1] = corners[i].y;
+      curr_xy[i << 1] = corners[i].x;
+      curr_xy[(i << 1) + 1] = corners[i].y;
       point_status[i] = 1;
     }
 
     self.postMessage({ type: 'anchored', points: getPointsArray() });
   } 
   else if (type === 'track') {
-    if (point_count < 8) {
+    if (point_count < 4) {
       self.postMessage({ type: 'lost' });
       return;
     }
 
-    // Seguimiento Lucas-Kanade incremental (prev -> curr)
+    // Seguimiento Lucas-Kanade
     jsfeat.optical_flow_lk.track(
       prev_img_pyr, curr_img_pyr, 
       prev_xy, curr_xy, 
       point_count, 
-      21, // win_size (ajustado para resolución 320px)
+      21, // win_size
       30, // max_iterations
       point_status, 
-      0.01, // epsilon
-      0.0001 // min_eigen (reducido para ser más robusto)
+      0.01, 
+      0.0001
     );
 
-    // Contar puntos válidos antes de RANSAC
     let tracked_count = 0;
     for (let i = 0; i < point_count; ++i) {
       if (point_status[i] === 1) tracked_count++;
     }
 
-    if (tracked_count > 8) {
-      // Filtrar puntos con RANSAC comparando contra la referencia ORIGINAL
-      // Esto nos da la homografía start -> current
+    if (tracked_count > 6) {
       const match_mask = new jsfeat.matrix_t(point_count, 1, jsfeat.U8_t | jsfeat.C1_t);
       const ok = jsfeat.ransac.find_model(
         homo_kernel, 
@@ -98,15 +104,14 @@ self.onmessage = (e) => {
         point_count, 
         homo_transform, 
         match_mask, 
-        500 // iters
+        1000 // Aumentar iteraciones para mayor estabilidad
       );
 
       if (ok) {
-        // Actualizar estados internos basado en inliers de RANSAC
         let inlier_count = 0;
         for (let i = 0; i < point_count; ++i) {
            if (match_mask.data[i] === 0) {
-             point_status[i] = 0; // Marcar outliers como perdidos
+             point_status[i] = 0;
            } else {
              inlier_count++;
            }
@@ -119,7 +124,10 @@ self.onmessage = (e) => {
           score: inlier_count / point_count
         });
       } else {
-        self.postMessage({ type: 'lost' });
+        // Si RANSAC falla, enviamos lost solo si el conteo bajó demasiado
+        if (tracked_count < 10) {
+           self.postMessage({ type: 'lost' });
+        }
       }
     } else {
       self.postMessage({ type: 'lost' });
