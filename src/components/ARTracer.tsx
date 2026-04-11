@@ -7,21 +7,15 @@ import {
   ZapOff, 
   Image as ImageIcon, 
   Eye, 
-  Lock, 
-  Unlock, 
   Maximize2,
   ChevronDown,
   RefreshCw,
   Video,
   StopCircle,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
   Brain,
   Activity,
-  Plus,
-  Minus
+  CheckCircle,
+  Unlock
 } from 'lucide-react';
 import { useGesture } from '@use-gesture/react';
 
@@ -257,7 +251,8 @@ const ARTracer: React.FC = () => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [showGestureHint, setShowGestureHint] = useState(false);
 
-  // --- LÓGICA DE MODO MURAL INTELIGENTE (IA SPATIAL ANCHOR) ---
+   // --- LÓGICA DE MODO MURAL INTELIGENTE (IA SPATIAL ANCHOR) ---
+  const [muralStep, setMuralStep] = useState<'none' | 'surface' | 'image' | 'anchoring' | 'tracking'>('none');
   const [isAISpatialMode, setIsAISpatialMode] = useState(false);
   const [trackingStatus, setTrackingStatus] = useState<'idle' | 'anchoring' | 'tracking' | 'lost'>('idle');
   const [homographyMatrix, setHomographyMatrix] = useState<number[] | null>(null);
@@ -284,10 +279,15 @@ const ARTracer: React.FC = () => {
     worker.onmessage = (e) => {
       const { type, matrix, points } = e.data;
       if (type === 'anchored') {
+        trackingStatusRef.current = 'tracking';
         setTrackingStatus('tracking');
+        // Pequeño delay para que el usuario vea el éxito antes de pasar a tracking libre
+        setTimeout(() => setMuralStep('tracking'), 1500);
       } else if (type === 'tracked') {
         setTrackingPoints(points);
+        trackingStatusRef.current = 'tracking';
         setTrackingStatus('tracking');
+        if (muralStep === 'anchoring') setMuralStep('tracking');
         
         // Aplicar filtrado a la matriz
         if (!kalmanMatrix.current) {
@@ -421,13 +421,13 @@ const ARTracer: React.FC = () => {
   const bind = useGesture(
     {
       onDrag: ({ offset: [x, y], touches }) => {
-        // Solo drag con 1 dedo (2 dedos = pinch)
-        if (isLocked || touches > 1) return;
-        setShowGestureHint(false); // Oculta el hint al primer gesto
+        // Solo drag con 1 dedo. En modo mural solo permitimos drag en el paso 'image'
+        if ((isLocked && muralStep !== 'image') || touches > 1) return;
+        setShowGestureHint(false); 
         setOffset({ x, y });
       },
       onPinch: ({ offset: [scale, angle] }) => {
-        if (isLocked) return;
+        if (isLocked && muralStep !== 'image') return;
         setShowGestureHint(false);
         setZoom(Math.max(0.1, scale));
         setRotation(angle);
@@ -496,7 +496,7 @@ const ARTracer: React.FC = () => {
       {/* CAPA DE GESTOS — z-30: encima de imagen (z-10) y decorativos, debajo de UI panel (z-40) */}
       {image && (
         <div 
-          {...(!isLocked ? bind() : {})}
+          {...(!isLocked || muralStep === 'image' ? bind() : {})}
           className="gesture-area"
           style={{
             position: 'absolute',
@@ -707,8 +707,7 @@ const ARTracer: React.FC = () => {
         {/* CONTROLES / GLASS PANEL - BOTTOM */}
         <AnimatePresence mode="wait">
           {isLocked ? (
-            /* MURAL MODE (LOCK) OVERLAY */
-            <motion.div 
+             <motion.div 
               key="lock-overlay"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -717,142 +716,159 @@ const ARTracer: React.FC = () => {
             >
               {/* Top info badge */}
               <div className="flex justify-center w-full">
-                <div style={{ background: 'rgba(0,0,0,0.6)', padding: '8px 16px', borderRadius: '16px', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: isAISpatialMode ? '#22c55e' : '#facc15', boxShadow: `0 0 10px ${isAISpatialMode ? '#22c55e' : '#facc15'}` }} className="animate-pulse" />
-                  <span style={{ fontSize: '10px', fontWeight: '900', letterSpacing: '0.15em', color: '#fff', textTransform: 'uppercase' }}>
-                    {isAISpatialMode ? `MURAL ANCLADO (${trackingStatus})` : 'MODO MURAL BLOQUEADO'}
+                <div style={{ background: 'rgba(0,0,0,0.8)', padding: '10px 20px', borderRadius: '20px', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ 
+                    width: '10px', height: '10px', borderRadius: '50%', 
+                    background: trackingStatus === 'tracking' ? '#22c55e' : trackingStatus === 'lost' ? '#f87171' : '#facc15',
+                    boxShadow: `0 0 15px ${trackingStatus === 'tracking' ? '#22c55e' : trackingStatus === 'lost' ? '#f87171' : '#facc15'}` 
+                  }} className={trackingStatus !== 'idle' ? "animate-pulse" : ""} />
+                  <span style={{ fontSize: '11px', fontWeight: '900', letterSpacing: '0.15em', color: '#fff', textTransform: 'uppercase' }}>
+                    {muralStep === 'none' && 'MODO MURAL BLOQUEADO'}
+                    {muralStep === 'surface' && 'PASO 1: DEFINE TU LIENZO'}
+                    {muralStep === 'image' && 'PASO 2: AJUSTA LA IMAGEN'}
+                    {muralStep === 'anchoring' && 'PASO 3: ANCLANDO... (NO TE MUEVAS)'}
+                    {muralStep === 'tracking' && 'MURAL ACTIVO (PUEDES MOVERTE)'}
                   </span>
                 </div>
               </div>
 
-              {/* Central Area: Left (Scales), Center (AI), Right (Position) */}
-              <div className="flex items-center justify-between w-full flex-1">
-                {/* Left: Escala */}
-                <div className="flex flex-col items-center gap-3 pointer-events-auto">
-                  <span className="text-[8px] font-black text-white/40 tracking-[0.2em] uppercase">Escala</span>
-                  <div className="flex flex-col gap-2">
-                    <button className="glass-button p-4" onClick={() => setZoom(z => Math.min(10, z + 0.1))}><Plus size={20}/></button>
-                    <button className="glass-button p-4" onClick={() => setZoom(z => Math.max(0.1, z - 0.1))}><Minus size={20}/></button>
-                  </div>
-                </div>
+              {/* Central Area: Context-Aware Helpers */}
+              <div className="flex flex-col items-center justify-center w-full flex-1 gap-8">
+                
+                {/* GUÍA DE SUPERFICIE (Solo en paso mapping) */}
+                {muralStep === 'surface' && (
+                  <motion.div 
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    style={{ 
+                      width: '80%', height: '60%', 
+                      border: '2px dashed #facc15', borderRadius: '12px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'rgba(250, 204, 21, 0.05)'
+                    }}
+                  >
+                    <span className="text-[10px] font-bold text-yellow-400 text-center px-8 tracking-wider">
+                      ALINEA ESTE CUADRO CON TU LIENZO.
+                      LA IMAGEN SE AJUSTARÁ A ESTA PROPORCIÓN.
+                    </span>
+                  </motion.div>
+                )}
 
-                {/* Center: AI Controls */}
-                <div className="flex flex-col items-center gap-4 pointer-events-auto">
-                  <div className="relative">
-                    {trackingStatus === 'anchoring' && (
+                {/* MENSAJES DE ESTADO IA */}
+                {muralStep === 'anchoring' && (
+                  <div className="flex flex-col items-center gap-4">
+                    {trackingStatus === 'tracking' ? (
                       <motion.div 
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1.2, opacity: 1 }}
-                        transition={{ repeat: Infinity, duration: 1.5, repeatType: 'reverse' }}
-                        className="absolute inset-0 border-2 border-indigo-500 rounded-full"
-                      />
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="flex flex-col items-center gap-4"
+                      >
+                         <CheckCircle size={64} className="text-green-400" />
+                         <span className="text-green-400 font-black text-xs tracking-[0.3em]">
+                           ¡ANCLADO! YA PUEDES MOVERTE
+                         </span>
+                      </motion.div>
+                    ) : (
+                      <>
+                        <div className="relative">
+                           <motion.div 
+                              animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
+                              transition={{ repeat: Infinity, duration: 2 }}
+                              className="absolute inset-0 bg-indigo-500/20 rounded-full"
+                           />
+                           <Brain size={64} className="text-indigo-400 animate-pulse" />
+                        </div>
+                        <span className="text-white font-black text-xs tracking-[0.3em] animate-pulse">
+                          ESTABLECIENDO PUNTO DE REFERENCIA...
+                        </span>
+                      </>
                     )}
-                    <button 
-                      onClick={() => {
-                        if (isAISpatialMode) {
-                          setIsAISpatialMode(false);
-                          setTrackingStatus('idle');
-                          if (rafRef.current) cancelAnimationFrame(rafRef.current);
-                        } else {
-                          startAIAnchoring();
-                        }
-                      }}
-                      className="glass-button"
-                      style={{ 
-                        width: '100px',
-                        height: '100px',
-                        borderRadius: '50%',
-                        flexDirection: 'column',
-                        background: isAISpatialMode 
-                          ? 'rgba(34, 197, 94, 0.2)' 
-                          : 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)',
-                        color: isAISpatialMode ? '#22c55e' : '#fff',
-                        borderColor: isAISpatialMode ? '#22c55e' : 'rgba(255,255,255,0.2)',
-                        gap: '8px',
-                        boxShadow: isAISpatialMode ? '0 0 30px rgba(34, 197, 94, 0.3)' : '0 10px 30px rgba(0,0,0,0.3)'
-                      }}
-                    >
-                      <Brain size={32} className={trackingStatus === 'tracking' ? 'animate-pulse' : ''} />
-                      <span style={{ fontSize: '9px', fontWeight: '900', letterSpacing: '0.05em' }}>
-                        {trackingStatus === 'anchoring' ? 'ESCANEANDO' : 
-                         isAISpatialMode ? 'DETENER IA' : 'ANCLAJE IA'}
-                      </span>
-                    </button>
                   </div>
-                  
-                  {isAISpatialMode && (
-                    <motion.button 
-                      whileHover={{ scale: 1.05, opacity: 1 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={startAIAnchoring}
-                      style={{ 
-                        fontSize: '9px', 
-                        color: '#fff', 
-                        opacity: 0.5, 
-                        background: 'rgba(255,255,255,0.05)', 
-                        border: '1px solid rgba(255,255,255,0.1)', 
-                        borderRadius: '12px',
-                        padding: '6px 12px',
-                        fontWeight: 'bold',
-                        letterSpacing: '0.1em',
-                        textTransform: 'uppercase',
-                        cursor: 'pointer',
-                        marginTop: '4px'
-                      }}
-                    >
-                      Reiniciar Anclaje
-                    </motion.button>
-                  )}
+                )}
 
-                  {trackingStatus === 'lost' && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f87171', fontSize: '9px', fontWeight: '900', letterSpacing: '0.1em' }}
-                    >
-                      <Activity size={12} className="animate-bounce" /> RECUPERANDO...
-                    </motion.div>
-                  )}
-                </div>
-
-                {/* Right: Posición */}
-                <div className="flex flex-col items-center gap-3 pointer-events-auto">
-                  <span className="text-[8px] font-black text-white/40 tracking-[0.2em] uppercase">Posición</span>
-                  <div className="flex flex-col items-center gap-2">
-                    <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, y: o.y - 5 }))}><ArrowUp size={20}/></button>
-                    <div className="flex gap-2">
-                      <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, x: o.x - 5 }))}><ArrowLeft size={20}/></button>
-                      <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, x: o.x + 5 }))}><ArrowRight size={20}/></button>
-                    </div>
-                    <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, y: o.y + 5 }))}><ArrowDown size={20}/></button>
-                  </div>
-                </div>
+                {trackingStatus === 'lost' && muralStep === 'tracking' && (
+                   <motion.div 
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="flex flex-col items-center gap-2 text-red-400"
+                   >
+                     <Activity size={32} className="animate-bounce" />
+                     <span className="text-[10px] font-black tracking-[0.2em] uppercase bg-black/40 px-4 py-2 rounded-full backdrop-filter blur-md">
+                       Perdí el anclaje. Vuelve a la posición original.
+                     </span>
+                   </motion.div>
+                )}
               </div>
 
-              {/* Bottom: Unlock Switch */}
-              <div className="flex justify-center w-full pointer-events-auto pb-4">
+              {/* Botones de Acción (Bottom Center) */}
+              <div className="flex flex-col items-center gap-4 pointer-events-auto pb-8">
+                
+                {/* BOTÓN PRINCIPAL SEGÚN PASO */}
+                {muralStep === 'none' && (
+                  <button 
+                    onClick={() => setMuralStep('surface')}
+                    className="glass-button px-10 py-5 bg-white text-black font-black tracking-widest text-xs rounded-2xl"
+                  >
+                    COMENZAR ANCLAJE INTELIGENTE
+                  </button>
+                )}
+
+                {muralStep === 'surface' && (
+                  <button 
+                    onClick={() => setMuralStep('image')}
+                    className="glass-button px-10 py-5 bg-yellow-400 text-black font-black tracking-widest text-xs rounded-2xl"
+                  >
+                    FIJAR LIENZO (PASO 2)
+                  </button>
+                )}
+
+                {muralStep === 'image' && (
+                  <div className="flex flex-col gap-3 items-center">
+                    {!image && (
+                      <label className="glass-button px-8 py-4 bg-blue-500 text-white font-black tracking-widest text-xs rounded-xl flex items-center gap-3">
+                        <ImageIcon size={18} /> SELECCIONAR IMAGEN
+                        <input type="file" accept="image/*" onChange={handleUpload} style={{ display: 'none' }} />
+                      </label>
+                    )}
+                    {image && (
+                      <button 
+                        onClick={() => {
+                          setMuralStep('anchoring');
+                          startAIAnchoring();
+                        }}
+                        className="glass-button px-10 py-5 bg-green-500 text-white font-black tracking-widest text-xs rounded-2xl shadow-[0_0_30px_rgba(34,197,94,0.4)]"
+                      >
+                        ANCLAR IMAGEN AHORA
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {muralStep === 'tracking' && (
+                  <button 
+                    onClick={() => {
+                       setMuralStep('surface');
+                       setTrackingStatus('idle');
+                       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                    }}
+                    className="glass-button px-6 py-3 bg-white/10 text-white font-bold tracking-widest text-[9px] rounded-xl flex items-center gap-2 border-white/20"
+                  >
+                    <RefreshCw size={14} /> REINICIAR POSICIÓN
+                  </button>
+                )}
+
+                {/* BOTÓN PARA SALIR */}
                 <button 
                   onClick={() => {
                     setIsLocked(false);
+                    setMuralStep('none');
                     setIsAISpatialMode(false);
                     setTrackingStatus('idle');
                     if (rafRef.current) cancelAnimationFrame(rafRef.current);
                   }}
-                  style={{ 
-                    padding: '16px 32px',
-                    borderRadius: '40px', 
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.2)',
-                    backdropFilter: 'blur(30px)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    cursor: 'pointer',
-                    boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
-                  }}
+                  className="flex items-center gap-2 text-white/40 font-bold text-[9px] tracking-[0.2em] uppercase mt-4"
                 >
-                  <Lock size={20} className="accent-yellow" />
-                  <span style={{ fontSize: '11px', fontWeight: '900', letterSpacing: '0.2em' }}>SALIR DEL MODO MURAL</span>
+                  <Unlock size={14} /> Salir del Mural
                 </button>
               </div>
             </motion.div>
