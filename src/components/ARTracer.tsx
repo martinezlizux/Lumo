@@ -295,7 +295,7 @@ const ARTracer: React.FC = () => {
         } else {
           kalmanMatrix.current = kalmanMatrix.current.map((v, i) => v * (1 - SMOOTHING_FACTOR) + matrix[i] * SMOOTHING_FACTOR);
         }
-        setHomographyMatrix([...kalmanMatrix.current]);
+        setHomographyMatrix([...(kalmanMatrix.current!)]);
       } else if (type === 'lost') {
         setTrackingStatus('lost');
       }

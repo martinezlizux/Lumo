@@ -1,4 +1,5 @@
 
+// @ts-ignore
 import jsfeat from 'jsfeat';
 
 // Configuración de JSFeat
