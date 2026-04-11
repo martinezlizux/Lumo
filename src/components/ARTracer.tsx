@@ -18,6 +18,8 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  Brain,
+  Activity,
   Plus,
   Minus
 } from 'lucide-react';
@@ -152,8 +154,15 @@ const useCamera = () => {
 
   useEffect(() => {
     startCamera();
-    return () => stream?.getTracks().forEach(t => t.stop());
   }, [startCamera]);
+
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [stream]);
 
   return { videoRef, stream, isTorchOn, hasTorch, toggleTorch, startCamera, error };
 };
@@ -176,12 +185,23 @@ const useWakeLock = () => {
   }, []);
 
   useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        request();
+      }
+    };
+
     request();
-    document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && request());
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [request]);
 
   return active;
 };
+
+// --- CONSTANTES DE CONFIGURACIÓN ---
+const VISION_WIDTH = 320;
+const SMOOTHING_FACTOR = 0.15;
 
 const ARTracer: React.FC = () => {
   const { videoRef, stream, isTorchOn, hasTorch, toggleTorch, startCamera, error } = useCamera();
@@ -236,6 +256,144 @@ const ARTracer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [showGestureHint, setShowGestureHint] = useState(false);
+
+  // --- LÓGICA DE MODO MURAL INTELIGENTE (IA SPATIAL ANCHOR) ---
+  const [isAISpatialMode, setIsAISpatialMode] = useState(false);
+  const [trackingStatus, setTrackingStatus] = useState<'idle' | 'anchoring' | 'tracking' | 'lost'>('idle');
+  const [homographyMatrix, setHomographyMatrix] = useState<number[] | null>(null);
+  const [trackingPoints, setTrackingPoints] = useState<{x: number, y: number}[]>([]);
+  const workerRef = useRef<Worker | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const processingCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const trackingStatusRef = useRef(trackingStatus);
+
+  // Sync ref with state for the processing loop
+  useEffect(() => {
+    trackingStatusRef.current = trackingStatus;
+  }, [trackingStatus]);
+
+  // Filtro Kalman simple para suavizar la matriz
+  const kalmanMatrix = useRef<number[] | null>(null);
+
+  useEffect(() => {
+    // Inicializar Worker
+    const worker = new Worker(new URL('../workers/vision.worker.ts', import.meta.url), { type: 'module' });
+    workerRef.current = worker;
+    
+    worker.onmessage = (e) => {
+      const { type, matrix, points } = e.data;
+      if (type === 'anchored') {
+        setTrackingStatus('tracking');
+      } else if (type === 'tracked') {
+        setTrackingPoints(points);
+        setTrackingStatus('tracking');
+        
+        // Aplicar filtrado a la matriz
+        if (!kalmanMatrix.current) {
+          kalmanMatrix.current = matrix;
+        } else {
+          kalmanMatrix.current = kalmanMatrix.current.map((v, i) => v * (1 - SMOOTHING_FACTOR) + matrix[i] * SMOOTHING_FACTOR);
+        }
+        setHomographyMatrix([...kalmanMatrix.current]);
+      } else if (type === 'lost') {
+        setTrackingStatus('lost');
+      }
+    };
+
+    return () => {
+      worker.terminate();
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []); // Stable setters and refs don't need to be in deps
+
+  const renderPoints = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !trackingPoints.length) return;
+    
+    if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    const scaleX = canvas.width / 320;
+    const scaleY = scaleX; 
+
+    ctx.fillStyle = '#22c55e';
+    trackingPoints.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x * scaleX, p.y * scaleY, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }, [trackingPoints]);
+
+  const processFrame = useCallback(() => {
+    if (!videoRef.current || !workerRef.current || trackingStatusRef.current === 'idle') {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      return;
+    }
+
+    const canvas = processingCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const buffer = imageData.data.buffer;
+
+    workerRef.current.postMessage({ 
+      type: trackingStatusRef.current === 'anchoring' ? 'anchor' : 'track', 
+      data: buffer,
+      w: canvas.width,
+      h: canvas.height
+    }, [buffer]);
+
+    renderPoints();
+    rafRef.current = requestAnimationFrame(processFrame);
+  }, [videoRef, renderPoints]);
+
+  const startAIAnchoring = useCallback(() => {
+    if (!videoRef.current || !workerRef.current) return;
+    
+    const w = VISION_WIDTH; 
+    const h = Math.round((videoRef.current.videoHeight / videoRef.current.videoWidth) * w);
+    
+    if (!processingCanvasRef.current) {
+      processingCanvasRef.current = document.createElement('canvas');
+      processingCanvasRef.current.width = w;
+      processingCanvasRef.current.height = h;
+      workerRef.current.postMessage({ type: 'init', w, h });
+    }
+
+    setTrackingStatus('anchoring');
+    setIsAISpatialMode(true);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(processFrame);
+  }, [videoRef, processFrame]);
+
+  // Convertir homografía de 3x3 a matrix3d de CSS
+  const getMatrix3D = useCallback(() => {
+    if (!homographyMatrix) return 'matrix3d(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1)';
+    const m = homographyMatrix;
+    // La matriz de homografía jsfeat es 3x3 row-major: m[0]..m[8]
+    // matrix3d de CSS es 4x4 column-major
+    return `matrix3d(
+      ${m[0]}, ${m[3]}, 0, ${m[6]},
+      ${m[1]}, ${m[4]}, 0, ${m[7]},
+      0, 0, 1, 0,
+      ${m[2]}, ${m[5]}, 0, ${m[8]}
+    )`;
+  }, [homographyMatrix]);
+
+  // La posición final de la imagen es la suma del offset manual
+  const finalX = offset.x;
+  const finalY = offset.y;
 
   // Muestra el hint al cargar la imagen, lo oculta solo tras 2.5s
   useEffect(() => {
@@ -308,6 +466,20 @@ const ARTracer: React.FC = () => {
         }}
       />
 
+      {/* CANVAS PARA PUNTOS DE IA (VISUAL FEEDBACK) */}
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: 25,
+          pointerEvents: 'none',
+          opacity: isAISpatialMode ? 0.8 : 0
+        }}
+      />
+
       {/* CAPA DE GESTOS — z-30: encima de imagen (z-10) y decorativos, debajo de UI panel (z-40) */}
       {image && (
         <div 
@@ -335,25 +507,56 @@ const ARTracer: React.FC = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: opacity }}
             className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none"
+            style={{ 
+              perspective: '1000px', // Añadir perspectiva para transformaciones 3D
+              transformStyle: 'preserve-3d'
+            }}
           >
-            <motion.img
-              src={image}
-              alt="Overlay"
-              className={isOutlineMode ? 'outline-mode' : ''}
+            {/* Contenedor de Anclaje (IA) */}
+            <motion.div
               animate={{
-                x: offset.x,
-                y: offset.y,
-                rotate: rotation,
-                scaleX: isMirrored ? -zoom : zoom,
-                scaleY: zoom
+                transform: isAISpatialMode ? getMatrix3D() : 'matrix3d(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1)'
               }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200, mass: 0.5 }}
+              transition={{ type: 'tween', duration: 0.05 }} // Suavizado ligero para el tracking
               style={{
-                maxWidth: '90%',
-                maxHeight: '90%',
-                objectFit: 'contain'
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transformOrigin: 'center center'
               }}
-            />
+            >
+              {/* Contenedor de Ajuste Manual */}
+              <motion.img
+                src={image}
+                alt="Overlay"
+                className={isOutlineMode ? 'outline-mode' : ''}
+                animate={{
+                  x: finalX,
+                  y: finalY,
+                  rotate: rotation,
+                  scaleX: isMirrored ? -zoom : zoom,
+                  scaleY: zoom,
+                }}
+                transition={{ 
+                  type: 'spring', 
+                  damping: 30, 
+                  stiffness: 250, 
+                  mass: 0.5,
+                  // Si estamos en modo IA, queremos que los ajustes manuales sean instantáneos para que no haya lag
+                  ...(isAISpatialMode ? { duration: 0 } : {})
+                }}
+                style={{
+                  maxWidth: '90%',
+                  maxHeight: '90%',
+                  objectFit: 'contain',
+                  boxShadow: (isAISpatialMode && trackingStatus === 'tracking') ? '0 0 50px rgba(34, 197, 94, 0.4)' : 'none',
+                  filter: isOutlineMode ? 'grayscale(100%) contrast(500%) invert(100%) brightness(110%)' : 'none',
+                  transformOrigin: 'center center'
+                }}
+              />
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -489,7 +692,7 @@ const ARTracer: React.FC = () => {
         </div>
 
         {/* CONTROLES / GLASS PANEL - BOTTOM */}
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {isLocked ? (
             /* MURAL MODE (LOCK) OVERLAY */
             <motion.div 
@@ -497,48 +700,147 @@ const ARTracer: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 z-[100] pointer-events-none flex items-center justify-between p-6"
+              className="absolute inset-0 z-[100] pointer-events-none flex flex-col justify-between p-8"
             >
-              {/* Controles finos (Mural Mode) a la izquierda */}
-              <div className="pointer-events-auto flex flex-col gap-4 bg-black/40 p-4 rounded-[32px] backdrop-blur-xl border border-white/10" style={{ boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-[9px] font-bold text-white/50 tracking-widest mb-2">MURAL POS</span>
-                  <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, y: o.y - 1 }))}><ArrowUp size={18}/></button>
-                  <div className="flex gap-1 my-1">
-                    <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, x: o.x - 1 }))}><ArrowLeft size={18}/></button>
-                    <div className="w-1" />
-                    <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, x: o.x + 1 }))}><ArrowRight size={18}/></button>
-                  </div>
-                  <button className="glass-button p-3" onClick={() => setOffset(o => ({ ...o, y: o.y + 1 }))}><ArrowDown size={18}/></button>
-                </div>
-                
-                <div className="w-full h-px bg-white/10 my-2" />
-                
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-[9px] font-bold text-white/50 tracking-widest mb-2">MURAL ZOOM</span>
-                  <button className="glass-button p-3" onClick={() => setZoom(z => z + 0.005)}><Plus size={18}/></button>
-                  <button className="glass-button p-3" onClick={() => setZoom(z => Math.max(0.01, z - 0.005))}><Minus size={18}/></button>
+              {/* Top info badge */}
+              <div className="flex justify-center w-full">
+                <div style={{ background: 'rgba(0,0,0,0.6)', padding: '8px 16px', borderRadius: '16px', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: isAISpatialMode ? '#22c55e' : '#facc15', boxShadow: `0 0 10px ${isAISpatialMode ? '#22c55e' : '#facc15'}` }} className="animate-pulse" />
+                  <span style={{ fontSize: '10px', fontWeight: '900', letterSpacing: '0.15em', color: '#fff', textTransform: 'uppercase' }}>
+                    {isAISpatialMode ? `MURAL ANCLADO (${trackingStatus})` : 'MODO MURAL BLOQUEADO'}
+                  </span>
                 </div>
               </div>
 
-              {/* Botón de desbloqueo a la derecha */}
-              <div className="pointer-events-auto flex flex-col items-center gap-4 self-end">
+              {/* Central Area: Left (Scales), Center (AI), Right (Position) */}
+              <div className="flex items-center justify-between w-full flex-1">
+                {/* Left: Escala */}
+                <div className="flex flex-col items-center gap-3 pointer-events-auto">
+                  <span className="text-[8px] font-black text-white/40 tracking-[0.2em] uppercase">Escala</span>
+                  <div className="flex flex-col gap-2">
+                    <button className="glass-button p-4" onClick={() => setZoom(z => Math.min(10, z + 0.1))}><Plus size={20}/></button>
+                    <button className="glass-button p-4" onClick={() => setZoom(z => Math.max(0.1, z - 0.1))}><Minus size={20}/></button>
+                  </div>
+                </div>
+
+                {/* Center: AI Controls */}
+                <div className="flex flex-col items-center gap-4 pointer-events-auto">
+                  <div className="relative">
+                    {trackingStatus === 'anchoring' && (
+                      <motion.div 
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1.2, opacity: 1 }}
+                        transition={{ repeat: Infinity, duration: 1.5, repeatType: 'reverse' }}
+                        className="absolute inset-0 border-2 border-indigo-500 rounded-full"
+                      />
+                    )}
+                    <button 
+                      onClick={() => {
+                        if (isAISpatialMode) {
+                          setIsAISpatialMode(false);
+                          setTrackingStatus('idle');
+                          if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                        } else {
+                          startAIAnchoring();
+                        }
+                      }}
+                      className="glass-button"
+                      style={{ 
+                        width: '100px',
+                        height: '100px',
+                        borderRadius: '50%',
+                        flexDirection: 'column',
+                        background: isAISpatialMode 
+                          ? 'rgba(34, 197, 94, 0.2)' 
+                          : 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)',
+                        color: isAISpatialMode ? '#22c55e' : '#fff',
+                        borderColor: isAISpatialMode ? '#22c55e' : 'rgba(255,255,255,0.2)',
+                        gap: '8px',
+                        boxShadow: isAISpatialMode ? '0 0 30px rgba(34, 197, 94, 0.3)' : '0 10px 30px rgba(0,0,0,0.3)'
+                      }}
+                    >
+                      <Brain size={32} className={trackingStatus === 'tracking' ? 'animate-pulse' : ''} />
+                      <span style={{ fontSize: '9px', fontWeight: '900', letterSpacing: '0.05em' }}>
+                        {trackingStatus === 'anchoring' ? 'ESCANEANDO' : 
+                         isAISpatialMode ? 'DETENER IA' : 'ANCLAJE IA'}
+                      </span>
+                    </button>
+                  </div>
+                  
+                  {isAISpatialMode && (
+                    <motion.button 
+                      whileHover={{ scale: 1.05, opacity: 1 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={startAIAnchoring}
+                      style={{ 
+                        fontSize: '9px', 
+                        color: '#fff', 
+                        opacity: 0.5, 
+                        background: 'rgba(255,255,255,0.05)', 
+                        border: '1px solid rgba(255,255,255,0.1)', 
+                        borderRadius: '12px',
+                        padding: '6px 12px',
+                        fontWeight: 'bold',
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        marginTop: '4px'
+                      }}
+                    >
+                      Reiniciar Anclaje
+                    </motion.button>
+                  )}
+
+                  {trackingStatus === 'lost' && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f87171', fontSize: '9px', fontWeight: '900', letterSpacing: '0.1em' }}
+                    >
+                      <Activity size={12} className="animate-bounce" /> RECUPERANDO...
+                    </motion.div>
+                  )}
+                </div>
+
+                {/* Right: Posición */}
+                <div className="flex flex-col items-center gap-3 pointer-events-auto">
+                  <span className="text-[8px] font-black text-white/40 tracking-[0.2em] uppercase">Posición</span>
+                  <div className="flex flex-col items-center gap-2">
+                    <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, y: o.y - 5 }))}><ArrowUp size={20}/></button>
+                    <div className="flex gap-2">
+                      <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, x: o.x - 5 }))}><ArrowLeft size={20}/></button>
+                      <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, x: o.x + 5 }))}><ArrowRight size={20}/></button>
+                    </div>
+                    <button className="glass-button p-4" onClick={() => setOffset(o => ({ ...o, y: o.y + 5 }))}><ArrowDown size={20}/></button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom: Unlock Switch */}
+              <div className="flex justify-center w-full pointer-events-auto pb-4">
                 <button 
-                  onClick={() => setIsLocked(false)}
+                  onClick={() => {
+                    setIsLocked(false);
+                    setIsAISpatialMode(false);
+                    setTrackingStatus('idle');
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                  }}
                   style={{ 
-                    width: '80px', height: '80px', borderRadius: '50%', 
-                    background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)',
-                    backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: '0 0 50px rgba(0,0,0,0.5)', cursor: 'pointer'
+                    padding: '16px 32px',
+                    borderRadius: '40px', 
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    backdropFilter: 'blur(30px)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    cursor: 'pointer',
+                    boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
                   }}
                 >
-                  <Lock size={32} className="accent-yellow" />
+                  <Lock size={20} className="accent-yellow" />
+                  <span style={{ fontSize: '11px', fontWeight: '900', letterSpacing: '0.2em' }}>SALIR DEL MODO MURAL</span>
                 </button>
-                <div style={{ background: 'rgba(0,0,0,0.5)', padding: '6px 12px', borderRadius: '12px', backdropFilter: 'blur(10px)' }}>
-                  <p style={{ fontSize: '9px', letterSpacing: '0.2em', opacity: 0.8, fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>
-                    MURAL MODE LOCKED
-                  </p>
-                </div>
               </div>
             </motion.div>
           ) : isMinimized ? (
